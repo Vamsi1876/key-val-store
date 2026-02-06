@@ -1,18 +1,23 @@
 import socket
+import selectors
 
-sock = socket.socket()
-sock.bind(("0.0.0.0",6740))
-sock.listen()
-print("Server is listening on port 6740...")
-
-client_sock,addr = sock.accept()
-print(f"Connection established with {addr}")
+sel = selectors.DefaultSelector()
 store = {}
-while True:
-    data = client_sock.recv(1024)
+
+def accept(server):
+    client,addr = server.accept()
+    client.setblocking(False)
+    print(f"Connection established with {addr}")
+    sel.register(client,selectors.EVENT_READ, read)
+
+def read(client):
+    data = client.recv(1024)
     if not data:
         print("Client disconnected.")
-        break
+        sel.unregister(client)
+        client.close()
+        return
+
     command = data.decode().strip()
     parts = command.split(" ", 2)
     cmd = parts[0].upper()
@@ -36,7 +41,23 @@ while True:
                 response = "NULL\n"
     else:
         response = "UNKNOWN COMMAND\n"
-    print(store)
-    client_sock.sendall(response.encode())
-client_sock.close()
-sock.close()
+    client.sendall(response.encode())
+    
+
+server = socket.socket()
+server.bind(("0.0.0.0", 6740))
+server.listen()
+server.setblocking(False)
+
+print("Server is listening on port 6740...")
+
+sel.register(server,selectors.EVENT_READ, accept)
+
+while True:
+    events = sel.select()
+    for key,_ in events:
+        callback = key.data
+        callback(key.fileobj)
+
+
+
