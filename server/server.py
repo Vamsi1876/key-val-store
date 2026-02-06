@@ -1,24 +1,42 @@
 import socket
-import selectors
+import select
 
-sel = selectors.DefaultSelector()
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", 6740))
+server.listen()
+server.setblocking(False)
+
+print("Server is listening on port 6740...")
+
 store = {}
+sockets = [server]
+buffers = {}
 
 def accept(server):
     client,addr = server.accept()
     client.setblocking(False)
+    sockets.append(client)
+    buffers[client] = b""
     print(f"Connection established with {addr}")
-    sel.register(client,selectors.EVENT_READ, read)
+    
 
 def read(client):
     data = client.recv(1024)
     if not data:
         print("Client disconnected.")
-        sel.unregister(client)
+        sockets.remove(client)
+        buffers.pop(client,None)
         client.close()
         return
 
-    command = data.decode().strip()
+    buffers[client] += data
+    while b"\n" in buffers[client]:
+        line, buffers[client] = buffers[client].split(b"\n", 1)
+        process_command(client, line)
+
+def process_command(client, line):    
+    command = line.decode().strip()
     parts = command.split(" ", 2)
     cmd = parts[0].upper()
     if cmd == "PING":
@@ -42,22 +60,15 @@ def read(client):
     else:
         response = "UNKNOWN COMMAND\n"
     client.sendall(response.encode())
-    
-
-server = socket.socket()
-server.bind(("0.0.0.0", 6740))
-server.listen()
-server.setblocking(False)
-
-print("Server is listening on port 6740...")
-
-sel.register(server,selectors.EVENT_READ, accept)
 
 while True:
-    events = sel.select()
-    for key,_ in events:
-        callback = key.data
-        callback(key.fileobj)
+    readable,_,_ = select.select(sockets,[],[])
+    for sock in readable:
+        if sock == server:
+            accept(server)
+        else:
+            read(sock)
 
 
 
+        
